@@ -1,3 +1,3 @@
 fn main() {
-    println!("Hello, world!");
+    p2p_chat::run();
 }
