@@ -42,7 +42,6 @@ I found these websites useful in developing this software:
 
 The following items I plan to fix, improve, and/or add to this project in the future:
 
-[//]: # (TODO)
-* [ ] First thing here
-* [ ]
-* [ ]
+* [ ] Support more than two peers
+* [ ] Support external connections, ideally [without port forwarding](https://stackoverflow.com/questions/16908714/how-do-you-create-a-peer-to-peer-connection-without-port-forwarding-or-a-centera)
+* [ ] Use threads to wait for things instead of polling
