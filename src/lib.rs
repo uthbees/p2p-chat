@@ -7,6 +7,7 @@
 pub mod config;
 pub mod utils;
 
+use crate::utils::non_blocking_read_line;
 use config::Config;
 use std::io::ErrorKind::WouldBlock;
 use std::io::{prelude::*, stdin, BufReader};
@@ -18,9 +19,6 @@ pub fn run(config: &Config) {
     listener
         .set_nonblocking(true)
         .expect("failed to set listener as non-blocking");
-
-    let stdin = stdin();
-    let mut user_input_buffer = String::new();
 
     notify(NotificationType::WaitingForConnections(config));
 
@@ -37,19 +35,13 @@ pub fn run(config: &Config) {
             Ok(result) => handle_connection_as_host(result.0, config),
         }
 
-        // TODO: Fix read_line blocking with crossterm's poll and read
-        let read_bytes = stdin
-            .read_line(&mut user_input_buffer)
-            .expect("encountered error reading user input");
-        if read_bytes > 0 {
-            let trimmed_input = user_input_buffer.trim();
-
-            if trimmed_input == "exit" {
+        if let Some(line) = non_blocking_read_line() {
+            if line == "exit" {
                 // End the program.
                 break;
             }
 
-            match Config::parse_port(user_input_buffer.trim()) {
+            match Config::parse_port(&line) {
                 Err(e) => {
                     println!("Failed to parse port: {e}");
                     println!("Try again.");
@@ -63,7 +55,6 @@ pub fn run(config: &Config) {
                     }
                 }
             }
-            user_input_buffer.clear();
         }
     }
 }
@@ -136,13 +127,13 @@ fn notify(notification_type: NotificationType) {
         }
         NotificationType::ConnectedAsHost => {
             println!("Connected to peer as host!");
-            println!("(Multiple simultaneous connections are not currently supported.)");
+            println!("(No longer listening - multiple simultaneous connections are not currently supported.)");
             println!("Type to send messages.");
             println!("To disconnect, type \"exit\".");
         }
         NotificationType::ConnectedAsClient => {
             println!("Connected to peer as client!");
-            println!("(Multiple simultaneous connections are not currently supported.)");
+            println!("(No longer listening - multiple simultaneous connections are not currently supported.)");
             println!("Type to send messages.");
             println!("To disconnect, type \"exit\".");
         }
