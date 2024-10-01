@@ -81,19 +81,27 @@ fn handle_connection(mut stream: TcpStream, config: &Config) {
     let mut stream_buffer_reader = BufReader::new(&stream_clone);
     let mut stream_buffer = [0; 8192];
 
-    // Alternate checking for received text and user input.
+    // Alternate between checking for received text and user input.
     loop {
         match stream_buffer_reader.read(&mut stream_buffer) {
             Err(err) => {
                 // WouldBlock errors are expected. Other errors are not.
                 if err.kind() != WouldBlock {
                     println!("Connection error: {err}");
+                    send_disconnect_signal(&stream);
                     break;
                 }
             }
             Ok(read_amount) if read_amount > 0 => {
                 let message = core::str::from_utf8(&stream_buffer[..read_amount])
                     .expect("TCP message should be valid UTF-8");
+
+                if message.contains('\0') {
+                    // Disconnect.
+                    println!("Peer disconnected.");
+                    break;
+                }
+
                 println!("Received message: {message}");
             }
             _ => {}
@@ -102,6 +110,7 @@ fn handle_connection(mut stream: TcpStream, config: &Config) {
         if let Some(line) = non_blocking_read_line() {
             if line == "exit" {
                 // Disconnect.
+                send_disconnect_signal(&stream);
                 break;
             }
 
@@ -109,11 +118,19 @@ fn handle_connection(mut stream: TcpStream, config: &Config) {
 
             if let Err(err) = stream.write_all(line.as_bytes()) {
                 println!("Connection error: {err}");
+                send_disconnect_signal(&stream);
                 break;
             }
         }
     }
     notify(NotificationType::Disconnected(config));
+}
+
+/// Attempt to tell the peer that we're disconnecting by sending the null character. If that fails,
+/// ignore the error since there's nothing we can do.
+fn send_disconnect_signal(mut stream: &TcpStream) {
+    const NULL_CHARACTER_IN_ARRAY: [u8; 1] = [b'\0'];
+    let _ = stream.write_all(&NULL_CHARACTER_IN_ARRAY);
 }
 
 enum NotificationType<'a> {
