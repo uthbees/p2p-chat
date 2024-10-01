@@ -10,7 +10,7 @@ pub mod utils;
 use crate::utils::non_blocking_read_line;
 use config::Config;
 use std::io::ErrorKind::WouldBlock;
-use std::io::{prelude::*, stdin, BufReader};
+use std::io::{prelude::*, BufReader};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 
 pub fn run(config: &Config) {
@@ -70,37 +70,47 @@ fn handle_connection_as_client(stream: TcpStream, config: &Config) {
 }
 
 fn handle_connection(mut stream: TcpStream, config: &Config) {
-    let mut stream_buffer_reader = BufReader::new(&mut stream);
-    let stream_buffer = &mut vec![];
-    let mut user_input_buffer = String::new();
-    let stdin = stdin();
+    // We set the listener as non-blocking earlier, but the streams need to be set as non-blocking separately.
+    stream
+        .set_nonblocking(true)
+        .expect("failed to set stream as non-blocking");
+    // Get another reference to the stream so we can both read and write.
+    let stream_clone = stream
+        .try_clone()
+        .expect("should be able to clone stream reference");
+    let mut stream_buffer_reader = BufReader::new(&stream_clone);
+    let mut stream_buffer = [0; 8192];
 
-    // Alternate checking for received text or user input.
+    // Alternate checking for received text and user input.
     loop {
-        if let Err(err) = stream_buffer_reader.read_to_end(stream_buffer) {
-            // WouldBlock errors are expected. Other errors are not.
-            assert_eq!(
-                err.kind(),
-                WouldBlock,
-                "encountered error reading TCP stream: {err}"
-            );
+        match stream_buffer_reader.read(&mut stream_buffer) {
+            Err(err) => {
+                // WouldBlock errors are expected. Other errors are not.
+                if err.kind() != WouldBlock {
+                    println!("Connection error: {err}");
+                    break;
+                }
+            }
+            Ok(read_amount) if read_amount > 0 => {
+                let message = core::str::from_utf8(&stream_buffer[..read_amount])
+                    .expect("TCP message should be valid UTF-8");
+                println!("Received message: {message}");
+            }
+            _ => {}
         }
-        println!("Received : {stream_buffer:#?}");
-        // TODO: Break out of the loop once the other side has disconnected.
 
-        let read_bytes = stdin
-            .read_line(&mut user_input_buffer)
-            .expect("encountered error reading user input");
-        if read_bytes > 0 {
-            let trimmed_input = user_input_buffer.trim();
-
-            if trimmed_input == "exit" {
+        if let Some(line) = non_blocking_read_line() {
+            if line == "exit" {
                 // Disconnect.
                 break;
             }
 
-            println!("Got input: {trimmed_input}");
-            // TODO: Send text.
+            println!("Got input: {line}");
+
+            if let Err(err) = stream.write_all(line.as_bytes()) {
+                println!("Connection error: {err}");
+                break;
+            }
         }
     }
     notify(NotificationType::Disconnected(config));
@@ -127,13 +137,13 @@ fn notify(notification_type: NotificationType) {
         }
         NotificationType::ConnectedAsHost => {
             println!("Connected to peer as host!");
-            println!("(No longer listening - multiple simultaneous connections are not currently supported.)");
+            println!("(No longer accepting connections - multiple simultaneous connections are not currently supported.)");
             println!("Type to send messages.");
             println!("To disconnect, type \"exit\".");
         }
         NotificationType::ConnectedAsClient => {
             println!("Connected to peer as client!");
-            println!("(No longer listening - multiple simultaneous connections are not currently supported.)");
+            println!("(No longer accepting connections - multiple simultaneous connections are not currently supported.)");
             println!("Type to send messages.");
             println!("To disconnect, type \"exit\".");
         }
