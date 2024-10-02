@@ -19,7 +19,7 @@ impl Config {
         Ok(IpAddr::from(
             match ip.chars().filter(|char| *char == '.').count() {
                 3 => {
-                    let mut split_ip = ip.split('.');
+                    let mut split_ip = ip.trim().split('.');
                     let mut ip_segments = [0u8; 4];
                     for elem in &mut ip_segments {
                         *elem = match split_ip
@@ -44,7 +44,7 @@ impl Config {
     }
 
     pub fn parse_port(port: &str) -> Result<u16, &'static str> {
-        port.parse::<u16>().map_err(|_| "Invalid port")
+        port.trim().parse::<u16>().map_err(|_| "Invalid port")
     }
 
     pub fn parse_screen_name(screen_name: &str) -> Result<String, &'static str> {

@@ -43,7 +43,6 @@ I found these websites useful in developing this software:
 The following items I plan to fix, improve, and/or add to this project in the future:
 
 * [ ] Support more than two peers
-* [ ] Support external connections, ideally [without port forwarding](https://stackoverflow.com/questions/16908714/how-do-you-create-a-peer-to-peer-connection-without-port-forwarding-or-a-centera)
 * [ ] Use threads to wait for things instead of polling
 * [ ] Disconnect/quit with the escape key instead of "exit". (The escape key can be detected by checking for its keycode, '\x1b', but detecting the key as soon as it's pressed requires external crates.)
 * [ ] Improve robustness: Validate request line datatypes (eg chat message vs screen name), handle interrupted read calls, handle errors/unexpected timings better during session setup, possibly add more checks for session stability (eg heartbeats).

@@ -46,20 +46,46 @@ pub fn run(config: &Config) {
                 break;
             }
 
-            match Config::parse_port(&line) {
-                Err(e) => {
-                    println!("Failed to parse port: {e}");
+            let parts: Vec<&str> = line.split(':').collect();
+            let ip: &str;
+            let port: &str;
+            match parts.len() {
+                1 => {
+                    ip = "127.0.0.1";
+                    port = parts[0];
+                }
+                2 => {
+                    ip = parts[0];
+                    port = parts[1];
+                }
+                _ => {
+                    println!("Too many colons!");
+                    // Initialize the ip/port to values that will fail parsing.
+                    ip = "";
+                    port = "";
+                }
+            }
+
+            match Config::parse_ip(ip) {
+                Err(err) => {
+                    println!("Failed to parse ip: {err}");
                     println!("Try again.");
                 }
-                Ok(port) => {
-                    if let Ok(stream) = TcpStream::connect(SocketAddr::new(config.ip, port)) {
-                        notify(NotificationType::ConnectingAsClient);
-                        handle_connection(stream, config);
-                    } else {
-                        println!("Couldn't connect to port {port}.");
+                Ok(ip) => match Config::parse_port(port) {
+                    Err(err) => {
+                        println!("Failed to parse port: {err}");
                         println!("Try again.");
                     }
-                }
+                    Ok(port) => {
+                        if let Ok(stream) = TcpStream::connect(SocketAddr::new(ip, port)) {
+                            notify(NotificationType::ConnectingAsClient);
+                            handle_connection(stream, config);
+                        } else {
+                            println!("Couldn't connect to {ip}:{port}.");
+                            println!("Try again.");
+                        }
+                    }
+                },
             }
         }
     }
@@ -175,8 +201,8 @@ fn notify(notification_type: NotificationType) {
                 "Listening for connections on {}:{}...",
                 config.ip, config.port
             );
-            println!("To connect to another peer on localhost, enter their port.");
-            println!("(External connections are not currently supported.)");
+            println!("To connect to another peer, enter their ip and port separated by a colon.");
+            println!("(Or just enter a port for localhost.)");
             println!("To exit the program, type \"exit\".");
         }
         NotificationType::ConnectingAsHost => {
