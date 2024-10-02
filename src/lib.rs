@@ -9,8 +9,10 @@ pub mod utils;
 
 use crate::utils::non_blocking_read_line;
 use config::Config;
+use crossterm::cursor::MoveToPreviousLine;
+use crossterm::terminal::{Clear, ClearType};
 use std::io::ErrorKind::WouldBlock;
-use std::io::{prelude::*, BufReader};
+use std::io::{prelude::*, stdout, BufReader};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 
 pub fn run(config: &Config) {
@@ -32,7 +34,10 @@ pub fn run(config: &Config) {
                     println!("Error: {e:#?}");
                 }
             }
-            Ok(result) => handle_connection_as_host(result.0, config),
+            Ok(result) => {
+                notify(NotificationType::ConnectingAsHost);
+                handle_connection(result.0, config);
+            }
         }
 
         if let Some(line) = non_blocking_read_line() {
@@ -48,7 +53,8 @@ pub fn run(config: &Config) {
                 }
                 Ok(port) => {
                     if let Ok(stream) = TcpStream::connect(SocketAddr::new(config.ip, port)) {
-                        handle_connection_as_client(stream, config);
+                        notify(NotificationType::ConnectingAsClient);
+                        handle_connection(stream, config);
                     } else {
                         println!("Couldn't connect to port {port}.");
                         println!("Try again.");
@@ -57,16 +63,6 @@ pub fn run(config: &Config) {
             }
         }
     }
-}
-
-fn handle_connection_as_host(stream: TcpStream, config: &Config) {
-    notify(NotificationType::ConnectedAsHost);
-    handle_connection(stream, config);
-}
-
-fn handle_connection_as_client(stream: TcpStream, config: &Config) {
-    notify(NotificationType::ConnectedAsClient);
-    handle_connection(stream, config);
 }
 
 fn handle_connection(mut stream: TcpStream, config: &Config) {
@@ -80,6 +76,41 @@ fn handle_connection(mut stream: TcpStream, config: &Config) {
         .expect("should be able to clone stream reference");
     let mut stream_buffer_reader = BufReader::new(&stream_clone);
     let mut stream_buffer = [0; 8192];
+    let mut stdout = stdout();
+
+    // Exchange screen names.
+    if let Err(err) = stream.write_all(format!("{}\n", config.screen_name).as_bytes()) {
+        println!("Failed to connect: {err}");
+        return;
+    }
+    let peer_screen_name: String;
+    loop {
+        match stream_buffer_reader.read(&mut stream_buffer) {
+            Err(err) => {
+                // WouldBlock errors are expected. Other errors are not.
+                if err.kind() != WouldBlock {
+                    println!("Connection error: {err}");
+                    return;
+                }
+            }
+            Ok(read_amount) if read_amount > 0 => {
+                let message = core::str::from_utf8(&stream_buffer[..read_amount])
+                    .expect("TCP message should be valid UTF-8");
+
+                if message.ends_with('\n') {
+                    peer_screen_name = Config::parse_screen_name(message)
+                        .expect("peer should send a valid screen name");
+                    break;
+                }
+
+                println!("Connection error: Could not parse peer's screen name.");
+                return;
+            }
+            _ => {}
+        }
+    }
+
+    notify(NotificationType::ConnectedToPeer(&peer_screen_name));
 
     // Alternate between checking for received text and user input.
     loop {
@@ -98,11 +129,11 @@ fn handle_connection(mut stream: TcpStream, config: &Config) {
 
                 if message.contains('\0') {
                     // Disconnect.
-                    println!("Peer disconnected.");
+                    println!("{peer_screen_name} disconnected.");
                     break;
                 }
 
-                println!("Received message: {message}");
+                println!("{peer_screen_name}: {message}");
             }
             _ => {}
         }
@@ -114,7 +145,10 @@ fn handle_connection(mut stream: TcpStream, config: &Config) {
                 break;
             }
 
-            println!("Got input: {line}");
+            // Replace the typed line with a chat history message.
+            crossterm::execute!(stdout, MoveToPreviousLine(1), Clear(ClearType::CurrentLine))
+                .expect("terminal commands should work");
+            println!("{}: {line}", config.screen_name);
 
             if let Err(err) = stream.write_all(line.as_bytes()) {
                 println!("Connection error: {err}");
@@ -133,13 +167,6 @@ fn send_disconnect_signal(mut stream: &TcpStream) {
     let _ = stream.write_all(&NULL_CHARACTER_IN_ARRAY);
 }
 
-enum NotificationType<'a> {
-    WaitingForConnections(&'a Config),
-    ConnectedAsHost,
-    ConnectedAsClient,
-    Disconnected(&'a Config),
-}
-
 #[allow(clippy::needless_pass_by_value)]
 fn notify(notification_type: NotificationType) {
     match notification_type {
@@ -152,15 +179,16 @@ fn notify(notification_type: NotificationType) {
             println!("(External connections are not currently supported.)");
             println!("To exit the program, type \"exit\".");
         }
-        NotificationType::ConnectedAsHost => {
-            println!("Connected to peer as host!");
-            println!("(No longer accepting connections - multiple simultaneous connections are not currently supported.)");
-            println!("Type to send messages.");
-            println!("To disconnect, type \"exit\".");
+        NotificationType::ConnectingAsHost => {
+            println!("Connecting to peer as host...");
+            println!("(Note that only one connection at a time is currently supported.)");
         }
-        NotificationType::ConnectedAsClient => {
-            println!("Connected to peer as client!");
-            println!("(No longer accepting connections - multiple simultaneous connections are not currently supported.)");
+        NotificationType::ConnectingAsClient => {
+            println!("Connecting to peer as client...");
+            println!("(Note that only one connection at a time is currently supported.)");
+        }
+        NotificationType::ConnectedToPeer(peer_name) => {
+            println!("Connected to {peer_name}.");
             println!("Type to send messages.");
             println!("To disconnect, type \"exit\".");
         }
@@ -169,4 +197,12 @@ fn notify(notification_type: NotificationType) {
             notify(NotificationType::WaitingForConnections(config));
         }
     }
+}
+
+enum NotificationType<'a> {
+    WaitingForConnections(&'a Config),
+    ConnectingAsHost,
+    ConnectingAsClient,
+    ConnectedToPeer(&'a str),
+    Disconnected(&'a Config),
 }
